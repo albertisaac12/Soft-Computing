@@ -1,106 +1,71 @@
+# som_minisom_example.py
+
 import numpy as np
-import seaborn as sns
 import matplotlib.pyplot as plt
+from minisom import MiniSom
+from sklearn import datasets
+from sklearn.preprocessing import MinMaxScaler
 
 
-class SOM:
-    def __init__(self, grid_x, grid_y, dims, lr=0.1, iters=1000):
-        self.grid_x = grid_x
-        self.grid_y = grid_y
-        self.dims = dims
-        self.lr = lr
-        self.iters = iters
-
-        # Random weights for each neuron (5,5,3)
-        self.weights = np.random.rand(grid_x, grid_y, dims)
-        print("Initial weights:\n", self.weights)
-
-    # ---------- BMU SEARCH ----------
-    def find_bmu(self, inputs):
-        diff = self.weights - inputs                # (5,5,3)
-        dist = np.sqrt(np.sum(diff**2, axis=2))     # (5,5)
-        return np.unravel_index(np.argmin(dist), dist.shape)
-
-    # ---------- TRAINING ----------
-    def train(self, data):
-        for t in range(self.iters):
-            x = data[np.random.randint(len(data))]  # pick random sample
-            i, j = self.find_bmu(x)
-            self.weights[i, j] += self.lr * (x - self.weights[i, j])
-
-    # ---------- MAP EACH DATA POINT TO BMU ----------
-    def map(self, data):
-        return [self.find_bmu(x) for x in data]
-
-    # ---------- U-MATRIX (DISTANCE HEATMAP) ----------
-    def plot_distance_map(self):
-        dist_map = np.zeros((self.grid_x, self.grid_y))
-
-        for i in range(self.grid_x):
-            for j in range(self.grid_y):
-                w = self.weights[i, j]
-                dist_map[i, j] = np.mean(np.sqrt(np.sum((self.weights - w)**2, axis=2)))
-
-        plt.figure(figsize=(6, 5))
-        sns.heatmap(dist_map, cmap="viridis")
-        plt.title("SOM Distance Heatmap (U-Matrix)")
-        plt.show()
-
-    # ---------- HIT MAP ----------
-    def plot_hit_map(self, mapped):
-        hit_map = np.zeros((self.grid_x, self.grid_y))
-
-        for (i, j) in mapped:
-            hit_map[i, j] += 1
-
-        plt.figure(figsize=(6, 5))
-        sns.heatmap(hit_map, annot=True, cmap="coolwarm")
-        plt.title("BMU Hit Map")
-        plt.show()
-
-    # ---------- WEIGHT HEATMAPS (ONE PER DIMENSION) ----------
-    def plot_weights(self):
-        fig, axes = plt.subplots(1, self.dims, figsize=(14, 4))
-
-        for d in range(self.dims):
-            sns.heatmap(self.weights[:, :, d], ax=axes[d], cmap="inferno")
-            axes[d].set_title(f"Weight Dimension {d}")
-
-        plt.show()
+# 1. Load some data (Iris dataset)
+iris = datasets.load_iris()
+X = iris.data        # shape (150, 4)
+y = iris.target      # class labels (0,1,2)
 
 
-# ---------------------------------------------------------
-# ------------------------ TEST ----------------------------
-# ---------------------------------------------------------
+# 2. Scale features to [0, 1] – SOMs work better when data is normalized
+scaler = MinMaxScaler()
+X_scaled = scaler.fit_transform(X)
 
-som = SOM(5, 5, 3, lr=0.1, iters=1000)
 
-data = np.array([
-    [0.77520317, 0.16904146, 0.76699433],
-    [0.33536585, 0.47239795, 0.21506437],
-    [0.91209456, 0.75920765, 0.67656136],
-    [0.02137628, 0.66087433, 0.09443959],
-    [0.83116257, 0.11274904, 0.56682961]
-])
+# 3. Create the SOM
+#    x,y = map size, input_len = number of features
+som_x, som_y = 10, 10
+som = MiniSom(
+    x=som_x,
+    y=som_y,
+    input_len=X_scaled.shape[1],
+    sigma=1.0,
+    learning_rate=0.5,
+    neighborhood_function='gaussian',
+    random_seed=42
+)
 
-print("\nTraining SOM...")
-som.train(data)
+# 4. Initialize and train the SOM
+som.random_weights_init(X_scaled)
+print("Training SOM...")
+som.train_random(data=X_scaled, num_iteration=1000)
+print("Training done!")
 
-mapped = som.map(data)
-print("\nMapped BMUs:", mapped)
 
-print("\nFinal weights:\n", som.weights)
+# 5. Get U-matrix (distance map) and plot it
+plt.figure(figsize=(7, 7))
+u_matrix = som.distance_map()  # returns a (som_x, som_y) matrix
+plt.imshow(u_matrix, interpolation='nearest')
+plt.title("SOM U-Matrix (Distance Map)")
+plt.colorbar(label="Distance")
 
-# ------------------- PLOTTING ----------------------------
-print("\nShowing U-Matrix...")
-som.plot_distance_map()
+# 6. Optionally overlay the data points with their class
+markers = ['o', 's', 'D']        # one marker per class
+colors = ['r', 'g', 'b']
 
-print("\nShowing Hit Map...")
-som.plot_hit_map(mapped)
+for i, x in enumerate(X_scaled):
+    w = som.winner(x)           # BMU coordinates (i,j)
+    plt.plot(
+        w[1] + 0.5,
+        w[0] + 0.5,
+        markers[y[i]],
+        markerfacecolor='none',
+        markeredgecolor=colors[y[i]],
+        markersize=8,
+        markeredgewidth=1.5
+    )
 
-print("\nShowing Weight Heatmaps...")
-som.plot_weights()
+plt.tight_layout()
+plt.show()
 
-print("\nSample → Cluster assignment:")
-for i, sample in enumerate(data):
-    print(f"Sample {sample} → BMU {mapped[i]}")
+
+# 7. Example: print BMU for first 5 samples
+print("\nBMUs for first 5 samples:")
+for i in range(100):
+    print(f"Sample {i}, class {y[i]}, BMU:", som.winner(X_scaled[i]))
